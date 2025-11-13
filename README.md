@@ -27,7 +27,7 @@ hasta que se envien por primera vez los datos en el módulo.
 
 **LCD I2C**
 
-Todos los sensores mostrarán 0 en sus lecturas durante el primer minuto; esto forma parte del funcionamiento esperado, ya que 
+Todos los sensores mostrarán 0 en sus lecturas durante el primer minuto; esto forma parte del funcionamiento esperado, ya que
 
 los datos se actualizan cuando se cargan en el archivo csv, que ocurre cada 60 segundos.
 
@@ -39,11 +39,11 @@ Archivo CSV del día 22 de octubre, uno de los días los cuales se hizo la prueb
 
 Informe completo del proyecto
 
+Bitácoras de todo el progreso del proyecto
+
 Código en .ino del proyecto y backup en .txt
 
 Archivo STL de la carcasa creada para el proyecto
 
 README
-
-
 
