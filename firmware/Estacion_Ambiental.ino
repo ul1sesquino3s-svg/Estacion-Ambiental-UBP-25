@@ -1,0 +1,243 @@
+// ESTACIÓN AMBIENTAL V2
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <DHT.h>
+#include <RtcDS1302.h>
+#include <SD.h>
+#include <SPI.h>
+ 
+#include <SoftwareSerial.h>  
+ 
+#define DHTPIN 6
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE);
+ 
+int t = 0;
+int h = 0;
+int porcentajeluz = 0;
+int porcentajehumedadt = 0;
+int estadopantalla = 0;
+ 
+char tiempoBuffer[20];
+char nombreArchivo[13];
+File myFile;
+ 
+const int sensorluz = A0;
+const int sensorhumt = A2;
+ 
+unsigned long tiempoanteriorpantalla = 0;
+const unsigned long tiempopantalla = 3000;
+ 
+unsigned long tiempoanteriorrtc = 0;
+const unsigned long tiemportc = 3000;
+ 
+unsigned long tiempoanteriorarchivo = 0;
+const unsigned long tiempoarchivo = 60000;  
+ 
+LiquidCrystal_I2C lcd(0x26, 16, 2);
+ 
+ThreeWire myWire(4, 5, 2); // IO, SCLK, CE
+RtcDS1302<ThreeWire> Rtc(myWire);
+RtcDateTime ahoraAnterior;
+ 
+SoftwareSerial BT(7, 8); // RX, TX
+ 
+ 
+void abrirArchivoNuevo(RtcDateTime ahora) {
+  if (myFile) {
+    myFile.close();
+  }
+ 
+  sprintf(nombreArchivo, "%04u%02u%02u.CSV",
+          ahora.Year(),
+          ahora.Month(),
+          ahora.Day());
+ 
+  myFile = SD.open(nombreArchivo, FILE_WRITE);
+ 
+  if (!myFile) {
+    Serial.print(F("Fallo al abrir archivo: "));
+    Serial.println(nombreArchivo);
+ 
+    // Recuperación del bus SPI y SD
+    Serial.println(F("Reiniciando bus SD..."));
+    SD.end();
+    delay(200);
+    if (SD.begin(10)) {
+      Serial.println(F("SD re-inicializada correctamente."));
+      myFile = SD.open(nombreArchivo, FILE_WRITE);
+ 
+      if (myFile) {
+        Serial.println(F("Archivo reabierto exitosamente tras reiniciar SD."));
+      } else {
+        Serial.println(F("Fallo al reabrir archivo después de reiniciar SD."));
+      }
+    } else {
+      Serial.println(F("Fallo total: no se pudo re-inicializar SD."));
+    }
+  } else {
+    Serial.print(F("Archivo abierto: "));
+    Serial.println(nombreArchivo);
+  }
+}
+ 
+void setup() {
+  Serial.begin(9600);
+ 
+  BT.begin(9600);                // agregado: inicializar el HC-05 en modo normal
+  BT.println("GORDATO listo "); // mensaje inicial al celular
+ 
+  lcd.init();
+  lcd.backlight();
+ 
+  dht.begin();
+ 
+  Rtc.Begin();
+  RtcDateTime compiled = RtcDateTime(__DATE__, __TIME__);
+ 
+  if (!Rtc.IsDateTimeValid()) {
+    Rtc.SetDateTime(compiled);
+  }
+ 
+  if (!Rtc.GetIsRunning()) {
+    Rtc.SetIsRunning(true);
+  }
+ 
+  if (Rtc.GetIsWriteProtected()) {
+    Rtc.SetIsWriteProtected(false);
+  }
+ 
+  Serial.println("Inicializando SD...");
+  pinMode(10, OUTPUT);
+  if (!SD.begin(10)) {
+    Serial.println("Fallo al inicializar SD.");
+    while (1);
+  }
+  Serial.println("Inicialización exitosa.");
+ 
+  RtcDateTime ahora = Rtc.GetDateTime();
+  ahoraAnterior = ahora;
+  abrirArchivoNuevo(ahora);
+}
+ 
+void loop() {
+  unsigned long tiempoactual = millis();
+ 
+  // ACTUALIZACIÓN DEL RTC
+  if (tiempoactual - tiempoanteriorrtc >= tiemportc) {
+    tiempoanteriorrtc = tiempoactual;
+ 
+    RtcDateTime ahora = Rtc.GetDateTime();
+ 
+    // Verifica si cambió el día
+    if (ahora.Day() != ahoraAnterior.Day() ||
+        ahora.Month() != ahoraAnterior.Month() ||
+        ahora.Year() != ahoraAnterior.Year()) {
+      ahoraAnterior = ahora;
+      abrirArchivoNuevo(ahora);
+    }
+ 
+    sprintf(tiempoBuffer,
+            "%04u/%02u/%02u %02u:%02u:%02u",
+            ahora.Year(),
+            ahora.Month(),
+            ahora.Day(),
+            ahora.Hour(),
+            ahora.Minute(),
+            ahora.Second());
+ 
+    Serial.print(F("RTC actualizado en buffer: "));
+    Serial.println(tiempoBuffer);
+  }
+ 
+  // MOSTRAR EN LCD
+  if (tiempoactual - tiempoanteriorpantalla >= tiempopantalla) {
+    tiempoanteriorpantalla = tiempoactual;
+ 
+    lcd.clear();
+    if (estadopantalla == 0) {
+      lcd.setCursor(0, 0);
+      lcd.print("T:");
+      lcd.print(t);
+      lcd.print("C");
+ 
+      lcd.setCursor(7, 0);
+      lcd.print("HA:");
+      lcd.print(h);
+      lcd.print("%");
+ 
+      lcd.setCursor(0, 1);
+      lcd.print("HS:");
+      lcd.print(porcentajehumedadt);
+      lcd.print("%");
+ 
+      lcd.setCursor(7, 1);
+      lcd.print("Luz:");
+      lcd.print(porcentajeluz);
+      lcd.print("%");
+ 
+      estadopantalla = 1;
+    } else {
+      lcd.setCursor(0, 0);
+      for (int i = 0; i < 10; i++) {
+        lcd.print(tiempoBuffer[i]);
+      }
+      lcd.setCursor(0, 1);
+      lcd.print(&tiempoBuffer[11]);
+      estadopantalla = 0;
+    }
+  }
+ 
+  // LECTURA Y ESCRITURA CADA 1 MINUTO (60,000 ms)
+  if (tiempoactual - tiempoanteriorarchivo >= tiempoarchivo) {
+    tiempoanteriorarchivo = tiempoactual;
+ 
+    h = dht.readHumidity();
+    t = dht.readTemperature();
+ 
+    int valorluz = analogRead(sensorluz);
+    porcentajeluz = map(valorluz, 0, 1023, 0, 100);
+ 
+    int valorhumedadt = analogRead(sensorhumt);
+    porcentajehumedadt = map(valorhumedadt, 600, 1023, 100, 0);
+ 
+    char cargardatos[80];
+    sprintf(cargardatos,
+            "%s,%d,%d,%d,%d",
+            tiempoBuffer,
+            t,
+            h,
+            porcentajeluz,
+            porcentajehumedadt);
+ 
+    // VERIFICAR ARCHIVO Y REINTENTAR SI FALLA
+    if (myFile) {
+      myFile.println(cargardatos);
+      myFile.flush();
+      Serial.print(F("Guardado en SD: "));
+      Serial.println(cargardatos);
+ 
+      BT.println(cargardatos);   // mandar la línea de datos al celular mediante HC-05
+ 
+    } else {
+      Serial.println(F("Archivo no disponible. Reintentando abrir..."));
+      abrirArchivoNuevo(Rtc.GetDateTime());
+ 
+      // Intentar de nuevo tras reabrir
+      if (myFile) {
+        myFile.println(cargardatos);
+        myFile.flush();
+        Serial.println(F("Escritura exitosa tras recuperación."));
+ 
+        BT.println(cargardatos); //también mandamos por BT después de recuperar
+ 
+      } else {
+        Serial.println(F("ERROR: Escritura fallida. No se pudo recuperar SD."));
+ 
+        BT.println("ERROR_SD"); // aviso de error por BT si ni la SD responde
+      }
+    }
+  }
+}
+ 
+ 
